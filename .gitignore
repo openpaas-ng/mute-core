@@ -4,7 +4,8 @@
 node_modules
 
 # Generated code
-lib
+dist
+.ava
 
 # Generated pack
 mute-core-*.tgz

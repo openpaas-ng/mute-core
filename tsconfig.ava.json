@@ -1,8 +1,7 @@
 {
   "compilerOptions": {
-    "declaration": true,
-    "declarationDir": "dist/types",
     "lib": ["dom", "es2015", "es2016"],
+    "outDir": ".ava",
     "sourceMap": true,
     "target": "ES5",
     "moduleResolution": "node",
@@ -12,9 +11,6 @@
     "pretty": true
   },
   "include": [
-    "src/**/*"
-  ],
-  "exclude": [
-    "src/proto"
+    "test/**/*"
   ]
 }
