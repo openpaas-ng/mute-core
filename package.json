@@ -1,12 +1,16 @@
 {
-  "name": "mute-core",
-  "description": "",
-  "version": "0.4.0",
-  "main": "./dist/commonjs/index.js",
-  "module": "./dist/esm/index.js",
-  "types": "./dist/types/index.d.ts",
+  "name": "@coast-team/mute-core",
+  "description": "Core component of MUTE collaborative editor",
+  "version": "9.1.6",
+  "main": "./dist/mute-core.node.es5.cjs.js",
+  "module": "./dist/mutecore.node.es5.esm.js",
+  "browser": "./dist/mute-core.browser.es5.esm.js",
+  "es2015": "dist/mute-core.browser.es2015.esm.js",
+  "esnext": "dist/mute-core.browser.esnext.esm.js",
+  "types": "dist/types/src/index.node.d.ts",
   "files": [
-    "dist"
+    "dist",
+    "src"
   ],
   "repository": {
     "type": "git",
@@ -20,46 +24,98 @@
   ],
   "author": "Matthieu Nicolas <matthieu.nicolas@inria.fr",
   "contributors": [
-    "Philippe Kalitine <philippe.kalitine@gmail.com> (http://philippe.kalitine.name/)",
-    "Quentin Tardivon"
+    "Philippe Kalitine <philippe.kalitine@gmail.com> (https://philippe.kalitine.name/)",
+    "Quentin Tardivon",
+    "Cedric Enclos"
   ],
   "license": "GPL-3.0",
+  "publishConfig": {
+    "access": "public"
+  },
   "scripts": {
-    "prebuild": "rm -rf dist",
-    "build": "tsc --outDir dist/commonjs && tsc -m es6 --types --outDir dist/esm",
-    "postbuild": "mkdir dist/types/proto && cp src/proto/index.d.ts dist/types/proto/ && npm run postbuildcommonjs && npm run postbuildesm",
-    "postbuildcommonjs": "mkdir dist/commonjs/proto && npm run protobasicconf -- -w commonjs -o dist/commonjs/proto/index.js",
-    "postbuildesm": "mkdir dist/esm/proto && npm run --silent protobasicconf -- -w es6 | babel -o dist/esm/proto/index.js",
+    "prepack": "npm run build",
+    "prebuild": "rm -rf dist && npm run proto",
+    "build": "rollup --config",
+    "postbuild": "mkdir -p dist/types/src/proto && cp src/proto/index.d.ts dist/types/src/proto && mkdir dist/proto && cp -r src/proto/*.proto dist/proto",
+    "prebuild-test": "rm -rf .ava/test && npm run proto",
+    "build-test": "tsc -p tsconfig.json --outDir .ava --module commonjs --allowJs",
+    "postbuild-test": "mkdir -p .ava/src/proto && pbjs -t static-module -w commonjs --no-verify --no-delimited --no-convert -o .ava/src/proto/index.js src/proto/index.proto",
     "check": "tsc --noEmit",
-    "lint": "tslint --project tsconfig.json",
-    "pretest": "rm -rf .ava && tsc -p tsconfig.ava.json && mkdir .ava/src/proto && npm run protobasicconf -- -w commonjs -o .ava/src/proto/index.js",
+    "lint": "tslint --fix -p tsconfig.json && prettier --write --list-different 'src/**/*.ts test/**/*.{ts}' './*.{ts,js,json,md}' './*.md' && markdownlint ./*.md",
+    "pretest": "npm run build-test",
     "test": "ava",
-    "protobasicconf": "pbjs -t static-module --no-verify --no-delimited --no-convert src/proto/index.proto",
-    "proto": "npm run protobasicconf -- -w es6 -o src/proto/index.js",
-    "postproto": "pbts -o src/proto/index.d.ts src/proto/index.js"
+    "proto": "pbjs -t static-module -w es6 --no-verify --no-delimited --no-convert -o src/proto/index.js src/proto/index.proto && pbts -o src/proto/index.d.ts src/proto/index.js",
+    "postproto": "rollup -c rollup.config.proto.js",
+    "precommit": "lint-staged && npm test",
+    "commitmsg": "commitlint -e $GIT_PARAMS",
+    "cz": "git-cz",
+    "release": "standard-version"
   },
   "dependencies": {
-    "mute-structs": "^0.4.0",
-    "protobufjs": "^6.8.4",
-    "rxjs": "^5.5.6",
+    "mute-structs": "^1.0.0",
+    "rxjs": "^6.3.3",
     "safe-any": "^1.0.2"
   },
   "devDependencies": {
-    "@types/node": "^8.5.7",
-    "ava": "^0.23.0",
-    "babel-cli": "^6.26.0",
-    "babel-preset-env": "^1.6.1",
-    "tslint": "^5.8.0",
-    "tslint-eslint-rules": "^4.1.1",
-    "typescript": "~2.4.2"
+    "@commitlint/cli": "^7.3.2",
+    "@commitlint/config-conventional": "^7.3.1",
+    "@types/node": "^8.10.39",
+    "assert": "^1.4.1",
+    "ava": "^1.1.0",
+    "commitizen": "^2.10.1",
+    "cz-conventional-changelog": "^2.1.0",
+    "husky": "^0.14.3",
+    "lint-staged": "^7.2.2",
+    "markdownlint-cli": "^0.13.0",
+    "prettier": "^1.16.0",
+    "protobufjs": "^6.8.8",
+    "rollup": "^0.65.2",
+    "rollup-plugin-cleanup": "^3.1.1",
+    "rollup-plugin-commonjs": "^9.1.6",
+    "rollup-plugin-filesize": "^4.0.1",
+    "rollup-plugin-node-resolve": "^3.4.0",
+    "rollup-plugin-re": "^1.0.7",
+    "rollup-plugin-typescript2": "^0.17.0",
+    "standard-version": "^4.4.0",
+    "tslint": "^5.12.1",
+    "tslint-config-prettier": "^1.17.0",
+    "typescript": "^3.2.4"
   },
   "ava": {
     "files": [
       ".ava/test/**/*.test.js"
     ],
-    "source": [
+    "sources": [
       "test"
     ],
     "timeout": "5s"
+  },
+  "commitlint": {
+    "extends": [
+      "@commitlint/config-conventional"
+    ]
+  },
+  "config": {
+    "commitizen": {
+      "path": "node_modules/cz-conventional-changelog"
+    }
+  },
+  "lint-staged": {
+    "linters": {
+      "*.md": [
+        "prettier --write --list-different",
+        "git add",
+        "markdownlint"
+      ],
+      "*.ts": [
+        "tslint --fix -p tsconfig.json -e src/proto/*",
+        "git add"
+      ],
+      "*.{ts,json,scss,css}": [
+        "prettier --write --list-different",
+        "git add"
+      ]
+    },
+    "concurrent": false
   }
 }

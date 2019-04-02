@@ -7,5 +7,9 @@ node_modules
 dist
 .ava
 
+# Temp
+.rpt2_cache
+
 # Generated pack
 mute-core-*.tgz
+coast-team-mute-core-*.tgz

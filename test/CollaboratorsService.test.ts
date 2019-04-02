@@ -1,85 +1,90 @@
 import test from 'ava'
-import { TestContext } from 'ava'
-import { Observable } from 'rxjs/Observable'
-import {from} from 'rxjs/observable/from'
-import {map} from 'rxjs/operators'
+import { from, Subject } from 'rxjs'
+import { map } from 'rxjs/operators'
 
-import { Collaborator, CollaboratorsService } from '../src/collaborators'
-import {
-    BroadcastMessage,
-    NetworkMessage,
-    SendToMessage,
-} from '../src/network'
+import { CollaboratorsService } from '../src/collaborators'
+import { IMessageIn, IMessageOut } from '../src/misc/IMessage'
 
-import {disposeOf} from './Helpers'
+test('pseudos-correct-send-and-delivery', (context) => {
+  const id = 42
+  const msgOut1 = new Subject<IMessageOut>()
+  const cs1 = new CollaboratorsService(new Subject<IMessageIn>(), msgOut1, { id })
 
-test('pseudos-correct-send-and-delivery', (t: TestContext) => {
-  const collaboratorsServiceIn = new CollaboratorsService()
-  disposeOf(collaboratorsServiceIn, 200)
-  const collaboratorsServiceOut = new CollaboratorsService()
-  disposeOf(collaboratorsServiceOut, 200)
+  const cs2 = new CollaboratorsService(
+    msgOut1.pipe(
+      map((msg) => {
+        const { recipientId, ...rest } = msg
+        return { senderId: recipientId || 0, ...rest }
+      })
+    ),
+    new Subject<IMessageOut>(),
+    { id: 43 }
+  )
 
-  const expectedId = 42
-  collaboratorsServiceOut.messageSource =
-        collaboratorsServiceIn.onMsgToBroadcast.pipe(
-          map((msg: BroadcastMessage): NetworkMessage => {
-            return new NetworkMessage(msg.service, expectedId, true, msg.content)
-          }),
-        )
-
-  const pseudos = ['Hello', 'There,', 'How', 'Are', 'You?']
+  const expectedUpdates = [
+    { id, displayName: 'Hello' },
+    { id, displayName: 'There,' },
+    { id, displayName: 'How' },
+    { id, displayName: 'Are' },
+    { id, displayName: 'You?' },
+  ]
   setTimeout(() => {
-    collaboratorsServiceIn.pseudoSource = from(pseudos)
-  }, 0)
+    cs1.localUpdate = from(expectedUpdates)
+    cs1.dispose()
+    cs2.dispose()
+  })
 
-  t.plan(pseudos.length * 2)
-  let counter = 0
-  return collaboratorsServiceOut.onCollaboratorChangePseudo.pipe(
-    map((collaborator: Collaborator): void => {
-      const expectedPseudo = pseudos[counter]
-      t.is(collaborator.id, expectedId)
-      t.is(collaborator.pseudo, expectedPseudo)
-
+  context.plan((expectedUpdates.length - 1) * 2)
+  let counter = 1
+  return cs2.remoteUpdate$.pipe(
+    map(({ id, displayName }) => {
+      context.is(id, id)
+      context.is(displayName, expectedUpdates[counter].displayName)
       counter++
-    }),
+    })
   )
 })
 
-test('peers-joining-correct-delivery', (t: TestContext) => {
-  const collaboratorsService = new CollaboratorsService()
-  disposeOf(collaboratorsService, 200)
+test('peers-joining-correct-delivery', (context) => {
+  const msgOut1 = new Subject<IMessageOut>()
+  const cs1 = new CollaboratorsService(new Subject<IMessageIn>(), msgOut1, { id: 0 })
 
-  const expectedIds = [0, 1, 7, 42, 80]
-  setTimeout(() => {
-    collaboratorsService.peerJoinSource = from(expectedIds)
-  }, 0)
-
-  t.plan(expectedIds.length * 2)
-  let counter = 0
-  return collaboratorsService.onCollaboratorJoin.pipe(
-    map((collaborator: Collaborator): void => {
-      const expectedId = expectedIds[counter]
-      t.is(collaborator.id, expectedId)
-      t.is(collaborator.pseudo, CollaboratorsService.DEFAULT_PSEUDO)
-
-      counter++
-    }),
+  const expectedIds = [{ id: 3 }, { id: 1 }, { id: 7 }, { id: 42 }, { id: 80 }]
+  let i = -1
+  const cs2 = new CollaboratorsService(
+    msgOut1.pipe(
+      map((msg) => {
+        i++
+        const { recipientId, ...rest } = msg
+        return { senderId: expectedIds[i].id || 0, ...rest }
+      })
+    ),
+    new Subject<IMessageOut>(),
+    { id: 0 }
   )
+
+  setTimeout(() => {
+    cs1.localUpdate = from(expectedIds)
+    cs1.dispose()
+    cs2.dispose()
+  })
+
+  context.plan(expectedIds.length)
+  let counter = 0
+  return cs2.join$.pipe(map(({ id }) => context.is(id, expectedIds[counter++].id)))
 })
 
-test('send-pseudo-to-joining-peer', (t: TestContext) => {
-  const collaboratorsService = new CollaboratorsService()
-  disposeOf(collaboratorsService, 200)
+test('send-pseudo-to-joining-peer', (context) => {
+  const msgOut1 = new Subject<IMessageOut>()
+  const cs1 = new CollaboratorsService(new Subject<IMessageIn>(), msgOut1, { id: 0 })
 
   const expectedId = 7
   setTimeout(() => {
-    collaboratorsService.peerJoinSource = from([expectedId])
-  }, 0)
+    cs1.memberJoin$ = from([expectedId])
+    cs1.dispose()
+    msgOut1.complete()
+  })
 
-  t.plan(1)
-  return collaboratorsService.onMsgToSendTo.pipe(
-    map((msg: SendToMessage): void => {
-      t.is(msg.id, expectedId)
-    }),
-  )
+  context.plan(1)
+  return msgOut1.pipe(map(({ recipientId: id }) => context.is(id, expectedId)))
 })

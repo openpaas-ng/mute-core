@@ -1,17 +1,26 @@
 language: node_js
+cache:
+  directories:
+    - ~/.npm
+notifications:
+  email: false
 node_js:
-- node
-- '8'
-- '7'
-- '6'
-before_deploy:
-  - "npm run build"
-deploy:
-  provider: npm
-  email: nicolasmatthieu57@gmail.com
-  api_key:
-    secure: I/Ig3jgb+/Ch5EwC3d1w5WX3CkcrZH8KXJBP/pamZcQis7/KEbNKQVwLzi1e4Lx1fCXuwg/Hh/01r1nsZKZJBk2d7Dhaj8s3ZzHAkttxeTqjtYhDqhP06qDRMIFu+ECnz69x4Swro26wWIiScKlezNAV8KyznyUbiCv4gxxGkklwIJT5E0Z5vMmDtbaec/yQk4C/+JDo8p/vYS2tXBvuGrNGkVsmy+8/LqnuHbGOdvxh7ZrOEh09S2FMlArnBo9rb0ccwORVwNVyOxZDh7mR7w+l1O//N82vGy9cRlboyyznOVHe09KqFfv9FrRj81f34SzLF+1ugQw5mNyLMaEPkNEfWCBAzrkiym50HcudA2Y6cbHGHnyVp9X1KaIB7rTmbTz6pjn9fq6AzZXG9J0P+9Y5gWNTRJT9gWzPt1ELKt8l+GF+DXOpTRA3EM9jmAWTmfTYtEPWvo50WkNyliuMAPHdqYNrnI6ydADuh7+VV9DRhG5Ta56O7T2gjUjJcx2vXPf1qjLynPOeC4dl/S3rz93uV5C1kiG8fCba9aMmJSVd7p7RM0DzPYSUaFyUO2aZNpXc/AZMUEkh303U1niOu53LCk6lMDTJ2Jp0sANqA9LCQDbC6Mh6WUNUq4oEHfhFDCDU+3SUxdAjVoow8tUQGtYQQ4KaCemlkEWPerb2mbI=
-  on:
-    tags: true
-    repo: coast-team/mute-core
-  skip_cleanup: true
+  - 'node'
+  - '9'
+  - '8'
+script:
+  - npm test
+jobs:
+  include:
+    - stage: release
+      if: tag IS present
+      node_js: 'node'
+      script: npm run build
+      deploy:
+        provider: npm
+        email: nicolasmatthieu57@gmail.com
+        api_key:
+          secure: B1Nc+NTv3LvbHzIzXpaQHfS7lgmsM2ur1SK/h1DO1KFpf9yMX6P7l21ED5tCt4BP7QGi9b041MnrzCVASdx5akDasV3atm/43byUQgbfubxUDt4vvjr8kcrGgwf3d/YHA/PiJ50QHH/pflm4w8jp0+uPSJK+LPx1SPhAOx4YyQ4dmmzpuhTwmV4Vcm/W5n9ghvWkea1YVEctCey6v99wjYy/OV4lvSYW1pVxY4tK8gg09OGhQaw778iGBixV6dZ8uOusT+UpDmCAWe1ulYn59bilAr7/pe+9V68tK3Y9oP4SWvSAaoPynQzd+rey65kOmSwib2aN4gr3NL4/0IO6Pumh1jGKd+InP3xlGG/7Bx9zd3xluCHOQzyQelOIBPxgAwh+O7leJAGSZSafnpsvyQo38ZukRQ3Z3aI4wAAryV+RcyL8EYu7DyDwHfdV72FIC5+MEE671NCo1d8VVdReL+w6b0rt2VVSj0suJgB8UpUD8Olj3d93X99UXzw2IofVaU1k9o0FRw2PozjXN15QGS2pEVDOyVtYlLWUCpp1Wn1EC2ZRIsC+Dc2qhpu2OW+KCFl5KA1Oeuam364kQnyeOBzqLYOFTHJUSjywLViqdQthtBjVvL2PNp6AXaiFmwxhqUAUzVqyZUuddjQ6TPr6ES8SusUyCEqrVJlBdhNuy0k=
+        skip_cleanup: true
+        on:
+          tags: true

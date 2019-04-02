@@ -1,1 +1,4 @@
-export { DocService, Position } from './DocService'
+export * from './MetaDataService'
+export * from './Title'
+export * from './FixData'
+export * from './Logs'

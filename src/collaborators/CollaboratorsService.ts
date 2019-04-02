@@ -1,128 +1,99 @@
-import { Observable } from 'rxjs/Observable'
-import { filter, takeUntil } from 'rxjs/operators'
-import { Subject } from 'rxjs/Subject'
+import { Observable, Subject } from 'rxjs'
 
-import { Disposable } from '../Disposable'
-import { BroadcastMessage, MessageEmitter, NetworkMessage, SendRandomlyMessage, SendToMessage } from '../network/'
-import { collaborator } from '../proto'
-import { Collaborator } from './Collaborator'
+import { IMessageIn, IMessageOut, Service } from '../misc'
+import { collaborator as proto } from '../proto'
+import { Streams } from '../Streams'
+import { ICollaborator } from './ICollaborator'
 
-export class CollaboratorsService implements Disposable, MessageEmitter {
+export class CollaboratorsService extends Service<proto.ICollaborator, proto.Collaborator> {
+  public me: ICollaborator
+  public collaborators: Map<number, ICollaborator>
 
-  static readonly DEFAULT_PSEUDO: string = 'Anonymous'
-  private static ID: string = 'Collaborators'
+  private updateSubject: Subject<ICollaborator>
+  private joinSubject: Subject<ICollaborator>
+  private leaveSubject: Subject<ICollaborator>
 
-  private pseudonym: string
+  constructor(
+    messageIn$: Observable<IMessageIn>,
+    messageOut$: Subject<IMessageOut>,
+    me: ICollaborator
+  ) {
+    super(messageIn$, messageOut$, Streams.COLLABORATORS, proto.Collaborator)
+    this.me = me
+    this.collaborators = new Map()
+    this.updateSubject = new Subject()
+    this.joinSubject = new Subject()
+    this.leaveSubject = new Subject()
 
-  private collaboratorChangePseudoSubject: Subject<Collaborator>
-  private collaboratorJoinSubject: Subject<Collaborator>
-  private collaboratorLeaveSubject: Subject<number>
-
-  private disposeSubject: Subject<void>
-
-  private msgToBroadcastSubject: Subject<BroadcastMessage>
-  private msgToSendRandomlySubject: Subject<SendRandomlyMessage>
-  private msgToSendToSubject: Subject<SendToMessage>
-
-  constructor () {
-    this.collaboratorChangePseudoSubject = new Subject()
-    this.collaboratorJoinSubject = new Subject()
-    this.collaboratorLeaveSubject = new Subject()
-    this.disposeSubject = new Subject()
-    this.msgToBroadcastSubject = new Subject()
-    this.msgToSendRandomlySubject = new Subject()
-    this.msgToSendToSubject = new Subject()
+    this.newSub = this.messageIn$.subscribe(({ senderId, msg }) => {
+      const updated = { id: senderId, ...msg }
+      const collab = this.collaborators.get(senderId)
+      if (collab) {
+        collab.muteCoreId = updated.muteCoreId || collab.muteCoreId
+        collab.displayName = updated.displayName || collab.displayName
+        collab.login = updated.login || collab.login
+        collab.email = updated.email || collab.email
+        collab.avatar = updated.avatar || collab.avatar
+        collab.deviceID = updated.deviceID || collab.deviceID
+        this.updateSubject.next(collab)
+      } else {
+        this.collaborators.set(updated.id, updated)
+        this.joinSubject.next(updated)
+      }
+    })
   }
 
-  get onCollaboratorChangePseudo (): Observable<Collaborator> {
-    return this.collaboratorChangePseudoSubject.asObservable()
-  }
-
-  get onCollaboratorJoin (): Observable<Collaborator> {
-    return this.collaboratorJoinSubject.asObservable()
-  }
-
-  get onCollaboratorLeave (): Observable<number> {
-    return this.collaboratorLeaveSubject.asObservable()
-  }
-
-  get onMsgToBroadcast (): Observable<BroadcastMessage> {
-    return this.msgToBroadcastSubject.asObservable()
-  }
-
-  get onMsgToSendRandomly (): Observable<SendRandomlyMessage> {
-    return this.msgToSendRandomlySubject.asObservable()
-  }
-
-  get onMsgToSendTo (): Observable<SendToMessage> {
-    return this.msgToSendToSubject.asObservable()
-  }
-
-  set leaveSource (source: Observable<void>) {}
-
-  set messageSource (source: Observable<NetworkMessage>) {
-    source.pipe(
-      takeUntil(this.disposeSubject),
-      filter((msg: NetworkMessage) => msg.service === CollaboratorsService.ID),
-    )
-      .subscribe((msg: NetworkMessage) => {
-        const collabMsg = collaborator.CollaboratorMsg.decode(msg.content)
-        const id: number = msg.id
-        const pseudo: string = collabMsg.pseudo
-        this.collaboratorChangePseudoSubject.next(new Collaborator(id, pseudo))
-      })
-  }
-
-  set peerJoinSource (source: Observable<number>) {
-    source.pipe(takeUntil(this.disposeSubject))
-      .subscribe((id: number) => {
-        this.emitPseudo(this.pseudonym, id)
-        const newCollaborator = new Collaborator(id, CollaboratorsService.DEFAULT_PSEUDO)
-        this.collaboratorJoinSubject.next(newCollaborator)
-      })
-  }
-
-  set peerLeaveSource (source: Observable<number>) {
-    source.pipe(takeUntil(this.disposeSubject))
-      .subscribe((id: number) => {
-        this.collaboratorLeaveSubject.next(id)
-      })
-  }
-
-  set pseudoSource (source: Observable<string>) {
-    source.pipe(takeUntil(this.disposeSubject))
-      .subscribe((pseudo: string) => {
-        this.pseudonym = pseudo
-        this.emitPseudo(pseudo)
-      })
-  }
-
-  emitPseudo (pseudo: string, id?: number): Uint8Array {
-    const collabMsg = collaborator.CollaboratorMsg.create({pseudo})
-
-    if (id) {
-      const msg: SendToMessage = new SendToMessage(
-        CollaboratorsService.ID, id, collaborator.CollaboratorMsg.encode(collabMsg).finish(),
-      )
-      this.msgToSendToSubject.next(msg)
-    } else {
-      const msg: BroadcastMessage = new BroadcastMessage(
-        CollaboratorsService.ID, collaborator.CollaboratorMsg.encode(collabMsg).finish(),
-      )
-      this.msgToBroadcastSubject.next(msg)
+  getCollaborator(muteCoreId: number): ICollaborator | undefined {
+    for (const c of this.collaborators.values()) {
+      if (c.muteCoreId === muteCoreId) {
+        return c
+      }
     }
-    return collaborator.CollaboratorMsg.encode(collabMsg).finish()
+    return undefined
   }
 
-  dispose (): void {
-    this.collaboratorChangePseudoSubject.complete()
-    this.collaboratorJoinSubject.complete()
-    this.collaboratorLeaveSubject.complete()
-    this.disposeSubject.next()
-    this.disposeSubject.complete()
-    this.msgToBroadcastSubject.complete()
-    this.msgToSendRandomlySubject.complete()
-    this.msgToSendToSubject.complete()
+  get remoteUpdate$(): Observable<ICollaborator> {
+    return this.updateSubject.asObservable()
   }
 
+  get join$(): Observable<ICollaborator> {
+    return this.joinSubject.asObservable()
+  }
+
+  get leave$(): Observable<ICollaborator> {
+    return this.leaveSubject.asObservable()
+  }
+
+  set memberJoin$(source: Observable<number>) {
+    this.newSub = source.subscribe((id: number) => this.emitUpdate(id))
+  }
+
+  set memberLeave$(source: Observable<number>) {
+    this.newSub = source.subscribe((id: number) => {
+      const collab = this.collaborators.get(id)
+      if (collab) {
+        this.leaveSubject.next(collab)
+      }
+      this.collaborators.delete(id)
+    })
+  }
+
+  set localUpdate(source: Observable<ICollaborator>) {
+    this.newSub = source.subscribe((data: ICollaborator) => {
+      Object.assign(this.me, data)
+      this.emitUpdate()
+    })
+  }
+
+  dispose() {
+    this.updateSubject.complete()
+    this.joinSubject.complete()
+    this.leaveSubject.complete()
+    super.dispose()
+  }
+
+  private emitUpdate(recipientId?: number) {
+    const { id, ...rest } = this.me
+    super.send(rest, recipientId)
+  }
 }

@@ -1,87 +1,201 @@
-import { Observable } from 'rxjs/Observable'
-import { merge } from 'rxjs/observable/merge'
-import { Subject } from 'rxjs/Subject'
-import { CollaboratorsService } from './collaborators/'
-import { Disposable } from './Disposable'
-import { DocService } from './doc/'
-import {
-  BroadcastMessage,
-  JoinEvent,
-  MessageEmitter,
-  NetworkMessage,
-  SendRandomlyMessage,
-  SendToMessage } from './network/'
-import { SyncMessageService, SyncService } from './sync/'
+import { LogootSOperation, LogootSRopes, TextOperation } from 'mute-structs'
+import { Observable, Subject } from 'rxjs'
+import { CollaboratorsService, ICollaborator } from './collaborators'
+import { DocService, Position, State } from './core'
+import { DocServiceStrategy, DocServiceStrategyMethod, StateTypes, Strategy } from './crdtImpl'
+import { LSState } from './crdtImpl/LogootSplit'
+import { FixDataState, LogState, MetaDataMessage, MetaDataService, TitleState } from './doc'
+import { LocalOperation, RemoteOperation } from './logs'
+import { Disposable, generateId, IMessageIn, IMessageOut } from './misc'
+import { collaborator as proto } from './proto'
 
-export class MuteCore implements Disposable, MessageEmitter {
+export type MuteCoreTypes = MuteCore<LogootSRopes, LogootSOperation>
 
-  readonly collaboratorsService: CollaboratorsService
-  readonly docService: DocService
-  readonly syncService: SyncService
-  readonly syncMessageService: SyncMessageService
+export interface SessionParameters {
+  strategy: Strategy
+  profile: proto.ICollaborator
+  docContent: StateTypes
+  metaTitle: TitleState
+  metaFixData: FixDataState
+  metaLogs: LogState
+}
 
-  private initSubject: Subject<string>
-
-  constructor (id: number) {
-    this.initSubject = new Subject<string>()
-
-    this.collaboratorsService = new CollaboratorsService()
-    this.docService = new DocService(id)
-    this.syncService = new SyncService(id)
-    this.syncMessageService = new SyncMessageService()
-
-    this.docService.initSource = this.initSubject
-    this.docService.remoteLogootSOperationSource = this.syncService.onRemoteLogootSOperation
-
-    this.syncService.localLogootSOperationSource = this.docService.onLocalLogootSOperation
-    this.syncService.remoteQuerySyncSource = this.syncMessageService.onRemoteQuerySync
-    this.syncService.remoteReplySyncSource = this.syncMessageService.onRemoteReplySync
-    this.syncService.remoteRichLogootSOperationSource = this.syncMessageService.onRemoteRichLogootSOperation
-    // this.syncService.storedStateSource = this.syncStorage.onStoredState
-
-    this.syncMessageService.localRichLogootSOperationSource = this.syncService.onLocalRichLogootSOperation
-    this.syncMessageService.querySyncSource = this.syncService.onQuerySync
-    this.syncMessageService.replySyncSource = this.syncService.onReplySync
+export class MuteCore<Seq, Op> extends Disposable {
+  public static mergeTitle(s1: TitleState, s2: TitleState): TitleState {
+    return MetaDataService.mergeTitle(s1, s2)
   }
 
-  set messageSource (source: Observable<NetworkMessage>) {
-    this.collaboratorsService.messageSource = source
-    this.syncMessageService.messageSource = source
+  public static mergeFixData(s1: FixDataState, s2: FixDataState): FixDataState {
+    return MetaDataService.mergeFixData(s1, s2)
   }
 
-  get onInit (): Observable<string> {
-    return this.initSubject.asObservable()
-  }
+  private collaboratorsService: CollaboratorsService
+  private metaDataService: MetaDataService
+  private docService: DocService<Seq, Op>
 
-  get onMsgToBroadcast (): Observable<BroadcastMessage> {
-    return merge(
-      this.collaboratorsService.onMsgToBroadcast,
-      this.syncMessageService.onMsgToBroadcast,
+  private _messageOut$: Subject<IMessageOut>
+  private _messageIn$: Subject<IMessageIn>
+
+  constructor(
+    { profile, strategy, docContent, metaTitle, metaFixData, metaLogs }: SessionParameters,
+    docServiceMethod: DocServiceStrategyMethod<Seq, Op>
+  ) {
+    super()
+    let muteCoreId: number
+    if (docContent.id !== 0) {
+      muteCoreId = docContent.id
+      profile.muteCoreId = muteCoreId
+    } else {
+      muteCoreId = profile.muteCoreId || generateId()
+      if (!profile.muteCoreId) {
+        profile.muteCoreId = muteCoreId
+      }
+    }
+
+    /* FIXME: this.me object doesn't have id property set to the correct network id (it is set to 0 just below).
+      This is because the id is initialized once join() method is called.
+    */
+    this._messageOut$ = new Subject()
+    this._messageIn$ = new Subject()
+
+    // Initialize CollaboratorsService
+    this.collaboratorsService = new CollaboratorsService(this._messageIn$, this._messageOut$, {
+      id: 0,
+      ...profile,
+    } as ICollaborator)
+
+    this.metaDataService = new MetaDataService(
+      this._messageIn$,
+      this._messageOut$,
+      metaTitle,
+      metaFixData,
+      metaLogs,
+      muteCoreId
     )
-  }
 
-  get onMsgToSendRandomly (): Observable<SendRandomlyMessage> {
-    return merge(
-      this.collaboratorsService.onMsgToSendRandomly,
-      this.syncMessageService.onMsgToSendRandomly,
+    this.docService = docServiceMethod(
+      strategy,
+      this._messageIn$,
+      this._messageOut$,
+      muteCoreId,
+      docContent,
+      this.collaboratorsService
     )
+
+    // Subscription for logs
+    // TODO
   }
 
-  get onMsgToSendTo (): Observable<SendToMessage> {
-    return merge(
-      this.collaboratorsService.onMsgToSendTo,
-      this.syncMessageService.onMsgToSendTo,
-    )
+  get myMuteCoreId(): number {
+    return this.collaboratorsService.me.muteCoreId || 0
   }
 
-  init (key: string): void {
-    this.initSubject.next(key)
+  get state(): State<Seq, Op> {
+    return this.docService.state
   }
 
-  dispose (): void {
-    this.collaboratorsService.dispose()
-    this.docService.dispose()
-    this.syncService.dispose()
-    this.syncMessageService.dispose()
+  set messageIn$(source: Observable<IMessageIn>) {
+    this.newSub = source.subscribe((msg) => this._messageIn$.next(msg))
+  }
+
+  get messageOut$(): Observable<IMessageOut> {
+    return this._messageOut$.asObservable()
+  }
+
+  /*
+   * Observables for logging
+   */
+  get localOperationForLog$(): Observable<LocalOperation<Op>> {
+    return this.docService.localOperationForLog$
+  }
+
+  get remoteOperationForLog(): Observable<RemoteOperation<Op>> {
+    return this.docService.remoteOperationForLog$
+  }
+
+  /*
+   * Doc observables
+   */
+  set localTextOperations$(source: Observable<TextOperation[]>) {
+    this.docService.localTextOperations$ = source
+  }
+
+  get remoteTextOperations$(): Observable<{
+    collaborator: ICollaborator | undefined
+    operations: TextOperation[]
+  }> {
+    return this.docService.remoteTextOperations$
+  }
+
+  get digestUpdate$(): Observable<number> {
+    return this.docService.digestUpdate$
+  }
+
+  /*
+   * CollaboratorsService observables
+   */
+  get remoteCollabUpdate$(): Observable<ICollaborator> {
+    return this.collaboratorsService.remoteUpdate$
+  }
+
+  set localCollabUpdate$(source: Observable<ICollaborator>) {
+    this.collaboratorsService.localUpdate = source
+  }
+
+  get collabJoin$(): Observable<ICollaborator> {
+    return this.collaboratorsService.join$
+  }
+
+  get collabLeave$(): Observable<ICollaborator> {
+    return this.collaboratorsService.leave$
+  }
+
+  set memberJoin$(source: Observable<number>) {
+    this.collaboratorsService.memberJoin$ = source
+    this.metaDataService.memberJoin$ = source
+  }
+
+  set memberLeave$(source: Observable<number>) {
+    this.collaboratorsService.memberLeave$ = source
+  }
+
+  /*
+   * MetaDataService observables
+   */
+
+  get remoteMetadataUpdate$(): Observable<MetaDataMessage> {
+    return this.metaDataService.remoteUpdate$
+  }
+
+  set localMetadataUpdate$(source: Observable<MetaDataMessage>) {
+    this.metaDataService.localUpdate$ = source
+  }
+
+  synchronize() {
+    this.docService.synchronize()
+  }
+
+  indexFromId(pos: any): number {
+    return this.docService.indexFromId(pos)
+  }
+
+  positionFromIndex(index: number): Position | undefined {
+    return this.docService.positionFromIndex(index)
+  }
+}
+
+export class MuteCoreFactory {
+  static createMuteCore(constructorParam: SessionParameters) {
+    switch (constructorParam.strategy) {
+      case Strategy.LOGOOTSPLIT:
+        if (constructorParam.docContent instanceof LSState) {
+          return new MuteCore<LogootSRopes, LogootSOperation>(
+            constructorParam,
+            DocServiceStrategy.createDocService
+          )
+        } else {
+          throw new Error('')
+        }
+    }
   }
 }
